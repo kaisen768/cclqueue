@@ -192,12 +192,61 @@ void* BlockingQueue::Peek()
 
 bool BlockingQueue::Put(const void* element)
 {
-    return false;
+    int c;
+
+    struct _Node_t *new_node = (struct _Node_t *)malloc(sizeof(struct _Node_t));
+    if (!new_node)
+    {
+        errno = ENOMEM;
+        return false;
+    }
+
+    new_node->item = element;
+    new_node->next = NULL;
+
+    pthread_mutex_lock(&put_lock_);
+
+    while (count_ == capacity_)
+    {
+        pthread_cond_wait(&not_full_, &put_lock_);
+    }
+
+    EnQueue(new_node);
+
+    c = count_.fetch_add(1);
+    if ((c + 1) < capacity_)
+        pthread_cond_signal(&not_full_);
+
+    pthread_mutex_unlock(&put_lock_);
+
+    if (c == 0)
+        SignalNotEmpty();
+
+    return true;
 }
 
 void* BlockingQueue::Take()
 {
-    return nullptr;
+    uint32_t c;
+    void* item = nullptr;
+
+    pthread_mutex_lock(&take_lock_);
+
+    while (count_ == 0)
+        pthread_cond_wait(&not_empty_, &take_lock_);
+
+    item = DeQueue();
+
+    c = count_.fetch_sub(1);
+    if (c > 1)
+        pthread_cond_signal(&not_empty_);
+
+    pthread_mutex_unlock(&take_lock_);
+
+    if (c == capacity_)
+        SignalNotFull();
+
+    return item;
 }
 
 }
